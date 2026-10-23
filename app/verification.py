@@ -52,6 +52,27 @@ def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     volume_found = _parse_volume(volume_found_text)
     checks['volume'] = verdict('review' if volume_expected is None or volume_found is None else 'pass' if abs(volume_expected - volume_found) < .5 else 'mismatch',
                                form.get('volume') or None, volume_found_text, 'Converted to milliliters for comparison.')
+    # Optional supplemental fields. Absence of an application value preserves legacy behavior.
+    # Non-detection is uncertain rather than a definitive regulatory violation.
+    for field, title in (
+        ('class_type', 'Class / type'),
+        ('producer', 'Producer / bottler'),
+        ('origin', 'Country of origin'),
+    ):
+        expected = (form.get(field) or '').strip()
+        if not expected:
+            continue
+        expected_tokens = re.findall(r'[a-z0-9]+', expected.casefold())
+        detected = normalized(joined)
+        # Ignore punctuation/case, but do not regard arbitrary scattered words as a match.
+        is_match = bool(expected_tokens) and normalized(expected) in detected
+        checks[field] = verdict(
+            'pass' if is_match else 'review',
+            expected,
+            next((line for line in lines if normalized(expected) in normalized(line)), None),
+            'Text found; verify label context and formatting visually.' if is_match
+            else title + ' could not be confidently extracted; inspect artwork manually.',
+        )
     # OCR inserts hyphenated line breaks and character substitutions on bottles.
     # Approximate comparison only prevents false mismatch; it never proves compliance.
     compact = re.sub(r'\s+', ' ', joined).strip()
