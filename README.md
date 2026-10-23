@@ -77,3 +77,12 @@ Tesseract avoids sending artwork to external third-party OCR APIs, recurring API
 - Verify that CSV filenames map to the correct applications; duplicate filenames or absent mappings fail explicitly.
 - Validate deploy availability at `/health` and end-to-end `/api/analyze` before assessment submission.
 - Security/operational trade-offs: public prototype endpoint has upload file-size and pixel-count caps but no authentication, rate limiting, or persistent audit trail; it must not be used for sensitive real applications or production regulatory decisions.
+
+
+## Acceptance testing snapshot — 2026-10-23
+A local OCR-only smoke benchmark used 12 synthesized labels and 4 real label photos. All 16 returned Tesseract OCR text without a local timeout. Times were approximately 0.26–0.49 seconds **in the local test container**, measured using the same single-thread Tesseract, image resizing, grayscale, and PSM settings. This does **not** establish regulatory accuracy or performance on Render Free CPU, and is not a 16/16 end-to-end pass. Detailed raw benchmark CSV can be shared with reviewers on request.
+
+HTTP endpoint integration tests in `tests/test_api.py` cover health, response contract, backwards compatibility, optional fields, invalid MIME, corrupt input and oversized files. Run with `python -m pytest -q` locally or in CI. Latest hosted deployment must still be checked separately, including response times for the 12 synthetic and 4 real photographs. The deployment management connector does not expose a general binary-upload HTTP client; hosted image-test pass/fail is **unverified** in this report.
+
+### Reviewer access
+The GitHub repository is private. **Before submitting**, either (a) invite the evaluator's specifically provided GitHub username to the repo and confirm access, or (b) make the repo public if allowed by the interview instructions and owner. The deployed site is publicly accessible independently of source permissions. Do not submit a private source URL assuming reviewers can automatically read it.
