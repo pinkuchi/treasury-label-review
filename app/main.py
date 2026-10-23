@@ -26,7 +26,7 @@ def health():
     return {'ok': True}
 
 @app.post('/api/analyze')
-async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str = Form(''), volume: str = Form('')):
+async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str = Form(''), volume: str = Form(''), class_type: str = Form(''), producer: str = Form(''), origin: str = Form('')):
     if file.content_type not in {'image/jpeg', 'image/png', 'image/webp', 'image/tiff'}:
         raise HTTPException(400, 'Please upload a JPEG, PNG, WebP, or TIFF image.')
     blob = await file.read(MAX_BYTES + 1)
@@ -56,6 +56,6 @@ async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str 
         raise HTTPException(400, 'Could not read this image; upload a clearer file.')
     except RuntimeError:
         raise HTTPException(503, 'OCR worker is overloaded; please retry or upload a cropped label image.')
-    result = evaluate(text, {'brand': brand, 'abv': abv, 'volume': volume}, ocr_confidence=ocr_confidence)
+    result = evaluate(text, {'brand': brand, 'abv': abv, 'volume': volume, 'class_type': class_type, 'producer': producer, 'origin': origin}, ocr_confidence=ocr_confidence)
     result.update({'filename': file.filename, 'duration_ms': round((time.perf_counter() - start) * 1000)})
     return result
