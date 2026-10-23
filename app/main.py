@@ -1,4 +1,5 @@
 import io
+import os
 import time
 from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -9,6 +10,7 @@ import pytesseract
 from pytesseract import Output
 from .verification import evaluate
 
+os.environ.setdefault('OMP_THREAD_LIMIT', '1')  # Avoid oversubscribing tiny Render Free CPUs.
 BASE = Path(__file__).resolve().parent
 MAX_BYTES = 8 * 1024 * 1024
 Image.MAX_IMAGE_PIXELS = 20_000_000
@@ -38,16 +40,12 @@ async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str 
             # Keep the image small: Tesseract on the Render free CPU is slow
             # even when a phone photo is well below the upload-size limit.
             image = ImageOps.exif_transpose(src).convert('RGB')
-            image.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
+            image.thumbnail((1400, 1400), Image.Resampling.LANCZOS)
             gray = ImageOps.autocontrast(ImageOps.grayscale(image))
-            try:
-                data = pytesseract.image_to_data(
-                    gray, config='--psm 11', output_type=Output.DICT, timeout=7)
-            except RuntimeError:
-                # Retry on fewer pixels, with an independent strict time budget.
-                gray.thumbnail((600, 600), Image.Resampling.LANCZOS)
-                data = pytesseract.image_to_data(
-                    gray, config='--psm 6', output_type=Output.DICT, timeout=4)
+            # Single-threaded Tesseract avoids CPU contention on small instances.
+            # One attempt with a short fixed deadline; do not double the wait on failure.
+            data = pytesseract.image_to_data(
+                gray, config='--psm 11', output_type=Output.DICT, timeout=9)
             words = [t for t in data['text'] if t and t.strip()]
             text = ' '.join(words)
             confidences = [float(c) for c, t in zip(data['conf'], data['text']) if t and t.strip() and float(c) >= 0]
@@ -57,7 +55,7 @@ async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str 
     except (UnidentifiedImageError, OSError, ValueError):
         raise HTTPException(400, 'Could not read this image; upload a clearer file.')
     except RuntimeError:
-        raise HTTPException(504, 'OCR exceeded the processing time limit; try a smaller/clearer image.')
+        raise HTTPException(503, 'OCR worker is overloaded; please retry or upload a cropped label image.')
     result = evaluate(text, {'brand': brand, 'abv': abv, 'volume': volume}, ocr_confidence=ocr_confidence)
     result.update({'filename': file.filename, 'duration_ms': round((time.perf_counter() - start) * 1000)})
     return result
