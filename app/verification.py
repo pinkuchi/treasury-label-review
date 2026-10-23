@@ -39,7 +39,11 @@ def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     if brand:
         matching = max((SequenceMatcher(None, normalized(brand), normalized(line)).ratio() for line in lines), default=0)
         present = normalized(brand) in normalized(joined)
-        checks['brand'] = verdict('pass' if present else 'review' if matching >= .78 or (ocr_confidence is not None and ocr_confidence < 60) else 'mismatch', brand,
+        # Missing/illegible OCR is not proof that the physical label has the wrong brand.
+        brand_status = ('review' if not normalized(joined) else
+                        'pass' if present else
+                        'review' if matching >= .78 or (ocr_confidence is not None and ocr_confidence < 60) else 'mismatch')
+        checks['brand'] = verdict(brand_status, brand,
                                   next((line for line in lines if normalized(brand) in normalized(line)), None),
                                   'Case, spacing and punctuation ignored; confirm visually.' if present else 'Brand not confidently identified; check label manually.')
     abv_expected = _parse_abv(form.get('abv', ''))
@@ -91,6 +95,7 @@ def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     target = normalized(WARNING)
     candidate = normalized(candidate)[:len(target) + 60]
     similarity = SequenceMatcher(None, target, candidate, autojunk=False).ratio()
+    # OCR similarity cannot prove exact statutory wording; uncertain matches always require review.
     fuzzy_complete = near_start and near_end and similarity >= 0.68
     if low_quality:
         warning_status = 'review'
