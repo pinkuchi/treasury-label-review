@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: treasury-label-review
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeployTrigger: commit
