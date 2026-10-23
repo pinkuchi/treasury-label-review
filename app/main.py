@@ -35,16 +35,19 @@ async def analyze(file: UploadFile = File(...), brand: str = Form(''), abv: str 
         with Image.open(io.BytesIO(blob)) as src:
             if src.width * src.height > 20_000_000:
                 raise HTTPException(413, 'Image dimensions too large (20 megapixel limit).')
+            # Keep the image small: Tesseract on the Render free CPU is slow
+            # even when a phone photo is well below the upload-size limit.
             image = ImageOps.exif_transpose(src).convert('RGB')
-            # Reduce expensive phone-photo OCR on the constrained Render Free CPU.
-            image.thumbnail((1800, 1800), Image.Resampling.LANCZOS)
+            image.thumbnail((1000, 1000), Image.Resampling.LANCZOS)
             gray = ImageOps.autocontrast(ImageOps.grayscale(image))
             try:
-                data = pytesseract.image_to_data(gray, config='--psm 11', output_type=Output.DICT, timeout=14)
+                data = pytesseract.image_to_data(
+                    gray, config='--psm 11', output_type=Output.DICT, timeout=7)
             except RuntimeError:
-                # A lower-resolution retry often recovers from timeout.
-                gray.thumbnail((1100, 1100), Image.Resampling.LANCZOS)
-                data = pytesseract.image_to_data(gray, config='--psm 6', output_type=Output.DICT, timeout=9)
+                # Retry on fewer pixels, with an independent strict time budget.
+                gray.thumbnail((600, 600), Image.Resampling.LANCZOS)
+                data = pytesseract.image_to_data(
+                    gray, config='--psm 6', output_type=Output.DICT, timeout=4)
             words = [t for t in data['text'] if t and t.strip()]
             text = ' '.join(words)
             confidences = [float(c) for c, t in zip(data['conf'], data['text']) if t and t.strip() and float(c) >= 0]
