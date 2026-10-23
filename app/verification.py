@@ -31,7 +31,7 @@ def _parse_volume(s):
     n, unit = float(match.group(1)), match.group(2).lower().replace('.', '').replace(' ', '')
     return round(n * {'ml': 1, 'cl': 10, 'l': 1000, 'floz': 29.5735295625}[unit], 2)
 
-def evaluate(ocr_text: str, form: dict):
+def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     lines = [re.sub(r'\s+', ' ', ln.strip()) for ln in ocr_text.splitlines() if ln.strip()]
     joined = ' '.join(lines)
     checks = {}
@@ -53,12 +53,32 @@ def evaluate(ocr_text: str, form: dict):
     checks['volume'] = verdict('review' if volume_expected is None or volume_found is None else 'pass' if abs(volume_expected - volume_found) < .5 else 'mismatch',
                                form.get('volume') or None, volume_found_text, 'Converted to milliliters for comparison.')
     compact = re.sub(r'\s+', ' ', joined).strip()
+    # Illegible OCR is uncertainty, not evidence of a regulatory violation.
+    low_quality = ocr_confidence is not None and ocr_confidence < 60
+    warning_fragments = any(term in normalized(compact) for term in
+        ('governmentwarning', 'surgeongeneral', 'birthdefects', 'healthproblems'))
     has_header = 'GOVERNMENT WARNING:' in joined
-    clauses = ["According to the Surgeon General", "women should not drink alcoholic beverages during pregnancy", "Consumption of alcoholic beverages", "impairs your ability to drive a car", "may cause health problems"]
-    all_clauses = all(normalized(x) in normalized(compact) for x in clauses)
-    checks['warning'] = verdict('review' if has_header and all_clauses else 'mismatch', 'Statutory Government Health Warning',
-                                'Header and key clauses detected' if has_header and all_clauses else 'Incomplete or unreadable warning',
-                                'Manual verification REQUIRED: OCR cannot prove exact wording, typography, boldness, or visual placement.' if has_header and all_clauses else 'Verify warning against official TTB wording; request better image if needed.')
+    has_wrong_case_header = bool(re.search(r'government\s+warning\s*:', joined, re.I)) and not has_header
+    full_text = normalized(WARNING) in normalized(compact)
+    if low_quality:
+        warning_status = 'review'
+        warning_note = 'Low OCR confidence: warning cannot be reliably evaluated. Request clearer artwork.'
+    elif has_wrong_case_header:
+        warning_status = 'mismatch'
+        warning_note = 'Warning heading is not in required uppercase format; verify original artwork.'
+    elif has_header and full_text:
+        warning_status = 'review'
+        warning_note = 'OCR text matches reference statement; verify exact type, bold heading and placement visually.'
+    elif warning_fragments:
+        warning_status = 'mismatch'
+        warning_note = 'Recognizable warning text is incomplete or differs from reference; inspect visually.'
+    else:
+        warning_status = 'mismatch' if compact and len(compact) > 35 else 'review'
+        warning_note = ('No government health warning detected on otherwise readable artwork; verify visually.'
+                        if warning_status == 'mismatch' else 'Warning could not be read; request a clearer label.')
+    checks['warning'] = verdict(warning_status, 'Statutory Government Health Warning',
+                                'Full text detected' if has_header and full_text else 'Missing, incomplete or unreadable',
+                                warning_note)
     statuses = [v['status'] for v in checks.values()]
     overall = 'mismatch' if 'mismatch' in statuses else 'review' if 'review' in statuses else 'pass'
     if overall == 'pass': overall = 'review'
