@@ -63,3 +63,21 @@ def test_warning_missing_second_section_still_mismatch():
 def test_low_quality_brand_missing_is_uncertain():
     out = evaluate('KEY COOKER S KENTUCKY WHS', {'brand': "BOOKER'S"}, ocr_confidence=25)
     assert out['checks']['brand']['status'] == 'review'
+
+
+def test_optional_fields_match_when_supplied():
+    text = 'OLD TOM DISTILLERY Kentucky Straight Bourbon Whiskey Produced by Example Distillery USA'
+    result = evaluate(text, {'class_type': 'kentucky straight bourbon whiskey', 'producer': 'Example Distillery', 'origin': 'USA'})
+    assert result['checks']['class_type']['status'] == 'pass'
+    assert result['checks']['producer']['status'] == 'pass'
+    assert result['checks']['origin']['status'] == 'pass'
+
+
+def test_unreadable_optional_fields_trigger_review_not_rejection():
+    result = evaluate('Old Tom 45% 750 mL', {'class_type': 'Whiskey', 'producer': 'Unknown Bottler', 'origin': 'Scotland'})
+    assert all(result['checks'][key]['status'] == 'review' for key in ('class_type', 'producer', 'origin'))
+
+
+def test_legacy_response_does_not_require_new_fields():
+    result = evaluate('OLD TOM DISTILLERY 45% 750 mL', {'brand': 'OLD TOM DISTILLERY', 'abv': '45%', 'volume': '750 mL'})
+    assert all(key not in result['checks'] for key in ('class_type','producer','origin'))
