@@ -22,7 +22,7 @@ def test_unknown_does_not_pass():
     out = evaluate('', {'brand': 'Bourbon', 'abv': '45%', 'volume': '750 mL'})
     assert out['checks']['abv']['status'] == 'review'
     assert out['checks']['volume']['status'] == 'review'
-    assert out['checks']['brand']['status'] == 'mismatch'
+    assert out['checks']['brand']['status'] == 'review'
 
 def test_low_confidence_warning_requires_review():
     out = evaluate('OLD TOM DISTILLERY 45% 750 mt GOVERNMENT WARNlNG illegible',
@@ -81,3 +81,16 @@ def test_unreadable_optional_fields_trigger_review_not_rejection():
 def test_legacy_response_does_not_require_new_fields():
     result = evaluate('OLD TOM DISTILLERY 45% 750 mL', {'brand': 'OLD TOM DISTILLERY', 'abv': '45%', 'volume': '750 mL'})
     assert all(key not in result['checks'] for key in ('class_type','producer','origin'))
+
+
+def test_empty_ocr_brand_is_uncertain_even_with_high_confidence():
+    out = evaluate('', {'brand': 'OLD TOM'}, ocr_confidence=98)
+    assert out['checks']['brand']['status'] == 'review'
+    assert out['human_review_required']
+
+
+def test_warning_typo_never_auto_approves():
+    from app.verification import WARNING
+    out = evaluate(WARNING.replace('birth defects', 'birch effects'), {}, ocr_confidence=90)
+    assert out['checks']['warning']['status'] != 'pass'
+    assert out['human_review_required']
