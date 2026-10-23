@@ -23,3 +23,24 @@ def test_unknown_does_not_pass():
     assert out['checks']['abv']['status'] == 'review'
     assert out['checks']['volume']['status'] == 'review'
     assert out['checks']['brand']['status'] == 'mismatch'
+
+def test_low_confidence_warning_requires_review():
+    out = evaluate('OLD TOM DISTILLERY 45% 750 mt GOVERNMENT WARNlNG illegible',
+                   {'brand': 'OLD TOM DISTILLERY', 'abv': '45%', 'volume': '750 mL'}, ocr_confidence=28)
+    assert out['checks']['warning']['status'] == 'review'
+    assert out['checks']['volume']['status'] == 'review'
+
+def test_warning_wrong_case_flagged():
+    from app.verification import WARNING
+    out = evaluate(WARNING.replace('GOVERNMENT WARNING:', 'Government Warning:'), {}, ocr_confidence=96)
+    assert out['checks']['warning']['status'] == 'mismatch'
+
+def test_complete_warning_still_needs_human_review():
+    from app.verification import WARNING
+    out = evaluate(WARNING, {}, ocr_confidence=96)
+    assert out['checks']['warning']['status'] == 'review'
+    assert out['human_review_required']
+
+def test_incomplete_warning_flagged_when_readable():
+    out = evaluate('Brand 45% 750 mL GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.', {}, ocr_confidence=95)
+    assert out['checks']['warning']['status'] == 'mismatch'
