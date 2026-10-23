@@ -44,3 +44,22 @@ def test_complete_warning_still_needs_human_review():
 def test_incomplete_warning_flagged_when_readable():
     out = evaluate('Brand 45% 750 mL GOVERNMENT WARNING: (1) According to the Surgeon General, women should not drink alcoholic beverages during pregnancy because of the risk of birth defects.', {}, ocr_confidence=95)
     assert out['checks']['warning']['status'] == 'mismatch'
+
+
+def test_warning_hyphenation_and_ocr_zero_are_uncertain_not_violation():
+    from app.verification import WARNING
+    noisy = WARNING.replace('According', 'ACCORD- ING').replace('to drive', 't0 drive')
+    out = evaluate(noisy, {}, ocr_confidence=85)
+    assert out['checks']['warning']['status'] == 'review'
+
+
+def test_warning_missing_second_section_still_mismatch():
+    from app.verification import WARNING
+    only_first = WARNING.split('(2)')[0]
+    out = evaluate(only_first, {}, ocr_confidence=90)
+    assert out['checks']['warning']['status'] == 'mismatch'
+
+
+def test_low_quality_brand_missing_is_uncertain():
+    out = evaluate('KEY COOKER S KENTUCKY WHS', {'brand': "BOOKER'S"}, ocr_confidence=25)
+    assert out['checks']['brand']['status'] == 'review'
