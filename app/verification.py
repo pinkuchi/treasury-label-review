@@ -39,7 +39,7 @@ def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     if brand:
         matching = max((SequenceMatcher(None, normalized(brand), normalized(line)).ratio() for line in lines), default=0)
         present = normalized(brand) in normalized(joined)
-        checks['brand'] = verdict('pass' if present else 'review' if matching >= .78 else 'mismatch', brand,
+        checks['brand'] = verdict('pass' if present else 'review' if matching >= .78 or (ocr_confidence is not None and ocr_confidence < 60) else 'mismatch', brand,
                                   next((line for line in lines if normalized(brand) in normalized(line)), None),
                                   'Case, spacing and punctuation ignored; confirm visually.' if present else 'Brand not confidently identified; check label manually.')
     abv_expected = _parse_abv(form.get('abv', ''))
@@ -52,32 +52,46 @@ def evaluate(ocr_text: str, form: dict, ocr_confidence: float | None = None):
     volume_found = _parse_volume(volume_found_text)
     checks['volume'] = verdict('review' if volume_expected is None or volume_found is None else 'pass' if abs(volume_expected - volume_found) < .5 else 'mismatch',
                                form.get('volume') or None, volume_found_text, 'Converted to milliliters for comparison.')
+    # OCR inserts hyphenated line breaks and character substitutions on bottles.
+    # Approximate comparison only prevents false mismatch; it never proves compliance.
     compact = re.sub(r'\s+', ' ', joined).strip()
-    # Illegible OCR is uncertainty, not evidence of a regulatory violation.
+    canonical = re.sub(r'(?<=\w)-\s+(?=\w)', '', compact)
+    evidence = normalized(canonical)
     low_quality = ocr_confidence is not None and ocr_confidence < 60
-    warning_fragments = any(term in normalized(compact) for term in
+    warning_fragments = any(term in evidence for term in
         ('governmentwarning', 'surgeongeneral', 'birthdefects', 'healthproblems'))
     has_header = 'GOVERNMENT WARNING:' in joined
     has_wrong_case_header = bool(re.search(r'government\s+warning\s*:', joined, re.I)) and not has_header
-    full_text = normalized(WARNING) in normalized(compact)
+    full_text = normalized(WARNING) in evidence
+    near_start = any(t in evidence for t in ('surgeongeneral', 'pregnancy', 'birthdefects'))
+    near_end = any(t in evidence for t in ('healthproblems', 'operatemachinery', 'abilitytodrive'))
+    header = re.search(r'government\s*warning\s*:', canonical, re.I)
+    candidate = canonical[header.start():] if header else canonical
+    target = normalized(WARNING)
+    candidate = normalized(candidate)[:len(target) + 60]
+    similarity = SequenceMatcher(None, target, candidate, autojunk=False).ratio()
+    fuzzy_complete = near_start and near_end and similarity >= 0.68
     if low_quality:
         warning_status = 'review'
         warning_note = 'Low OCR confidence: warning cannot be reliably evaluated. Request clearer artwork.'
     elif has_wrong_case_header:
         warning_status = 'mismatch'
-        warning_note = 'Warning heading is not in required uppercase format; verify original artwork.'
+        warning_note = 'Warning heading may not be uppercase; inspect original artwork.'
     elif has_header and full_text:
         warning_status = 'review'
-        warning_note = 'OCR text matches reference statement; verify exact type, bold heading and placement visually.'
+        warning_note = 'OCR text resembles the full reference statement; verify exact wording, bold heading and placement visually.'
+    elif fuzzy_complete:
+        warning_status = 'review'
+        warning_note = 'Both warning sections appear present, but OCR has differences; visually verify every word, heading and formatting.'
     elif warning_fragments:
         warning_status = 'mismatch'
-        warning_note = 'Recognizable warning text is incomplete or differs from reference; inspect visually.'
+        warning_note = 'Only part of the warning was recognized; inspect original label for missing text or OCR errors.'
     else:
         warning_status = 'mismatch' if compact and len(compact) > 35 else 'review'
-        warning_note = ('No government health warning detected on otherwise readable artwork; verify visually.'
-                        if warning_status == 'mismatch' else 'Warning could not be read; request a clearer label.')
+        warning_note = ('No health warning recognized in readable text; check that the image includes the correct panel.'
+                        if warning_status == 'mismatch' else 'Warning could not be read; request clearer artwork or another panel.')
     checks['warning'] = verdict(warning_status, 'Statutory Government Health Warning',
-                                'Full text detected' if has_header and full_text else 'Missing, incomplete or unreadable',
+                                'Full text detected' if has_header and full_text else 'Detected fragments / uncertain',
                                 warning_note)
     statuses = [v['status'] for v in checks.values()]
     overall = 'mismatch' if 'mismatch' in statuses else 'review' if 'review' in statuses else 'pass'
